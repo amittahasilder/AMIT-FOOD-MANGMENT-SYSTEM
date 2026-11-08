@@ -1,5 +1,7 @@
 
 
+
+
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -11,16 +13,18 @@ import restaurantRoutes from "./modules/restaurants/restaurant.routes";
 import ownerApplicationRoutes from "./modules/owner-applications/owner-application.routes";
 import menuRoutes from "./modules/menu/menu.routes";
 import orderRoutes from "./modules/orders/order.routes";
+import sellerRoutes from "./modules/marketplace/seller.routes";
 
 const app = express();
 
-// Hide Express fingerprint
+// ==========================================
+// SECURITY CONFIGURATION
+// ==========================================
+
 app.disable("x-powered-by");
 
-// Security headers
 app.use(helmet());
 
-// CORS configuration
 app.use(
   cors({
     origin: process.env.CLIENT_URL || "http://localhost:3000",
@@ -28,23 +32,36 @@ app.use(
   })
 );
 
-// Parse JSON request bodies
-app.use(express.json({ limit: "1mb" }));
+// ==========================================
+// MIDDLEWARE
+// ==========================================
 
-// Parse authentication cookies
+app.use(express.json({ limit: "1mb" }));
+app.use(express.urlencoded({ extended: true, limit: "1mb" }));
+
 app.use(cookieParser());
 
-// Global API rate limiting
+// ==========================================
+// GLOBAL RATE LIMITING
+// ==========================================
+
 app.use(
   rateLimit({
     windowMs: 15 * 60 * 1000,
     limit: 200,
     standardHeaders: true,
     legacyHeaders: false,
+    message: {
+      success: false,
+      message: "Too many requests. Please try again later.",
+    },
   })
 );
 
-// Root endpoint
+// ==========================================
+// ROOT API
+// ==========================================
+
 app.get("/", (_req, res) => {
   res.status(200).json({
     success: true,
@@ -52,7 +69,10 @@ app.get("/", (_req, res) => {
   });
 });
 
-// Health check endpoint
+// ==========================================
+// HEALTH CHECK
+// ==========================================
+
 app.get("/api/health", (_req, res) => {
   res.status(200).json({
     success: true,
@@ -61,19 +81,51 @@ app.get("/api/health", (_req, res) => {
   });
 });
 
-// Authentication routes
+// ==========================================
+// AUTHENTICATION
+// ==========================================
+
 app.use("/api/auth", authRoutes);
 
-// Restaurant management routes
+// ==========================================
+// RESTAURANT MANAGEMENT
+// ==========================================
+
 app.use("/api/restaurants", restaurantRoutes);
 
-// Owner application routes
+// ==========================================
+// OWNER APPLICATIONS
+// ==========================================
+
 app.use("/api/owner-applications", ownerApplicationRoutes);
 
-// Food menu management routes
+// ==========================================
+// MENU AND CATEGORIES
+// ==========================================
+
 app.use("/api/menu", menuRoutes);
 
-// Customer orders and restaurant order management
+// ==========================================
+// CUSTOMER ORDERS
+// ==========================================
+
 app.use("/api/orders", orderRoutes);
+
+// ==========================================
+// MARKETPLACE - SELLER MANAGEMENT
+// ==========================================
+
+app.use("/api/marketplace/sellers", sellerRoutes);
+
+// ==========================================
+// 404 HANDLER
+// ==========================================
+
+app.use((_req, res) => {
+  res.status(404).json({
+    success: false,
+    message: "API endpoint not found",
+  });
+});
 
 export default app;
