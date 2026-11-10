@@ -14,25 +14,25 @@ import {
 
 const router = Router();
 
-// Authentication required
+// Authentication
 router.use(requireAuth);
 
-// Customer access only
+// Customer only
 router.use(authorizeRoles("customer"));
 
-// Get current customer's cart
+// Get customer cart
 router.get("/", getMyCart);
 
-// Add item to cart
+// Add item
 router.post("/", addToCart);
 
-// Update cart item quantity
+// Clear cart - MUST come before /:itemId
+router.delete("/clear", clearMyCart);
+
+// Update item quantity
 router.patch("/:itemId", updateCartItem);
 
-// Remove item from cart
+// Remove item
 router.delete("/:itemId", removeCartItem);
-
-// Clear entire cart
-router.delete("/clear", clearMyCart);
 
 export default router;

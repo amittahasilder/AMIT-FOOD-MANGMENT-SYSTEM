@@ -17,6 +17,10 @@ export interface ICart extends mongoose.Document {
   updatedAt: Date;
 }
 
+// ==========================================
+// CART ITEM SCHEMA
+// ==========================================
+
 const cartItemSchema = new Schema<ICartItem>(
   {
     itemType: {
@@ -45,7 +49,10 @@ const cartItemSchema = new Schema<ICartItem>(
   { _id: true }
 );
 
-// Validate that each item references the correct product type.
+// ==========================================
+// CART ITEM VALIDATION
+// ==========================================
+
 cartItemSchema.pre("validate", function () {
   if (this.itemType === "restaurant") {
     if (!this.menuItem || this.product) {
@@ -66,6 +73,10 @@ cartItemSchema.pre("validate", function () {
   }
 });
 
+// ==========================================
+// CART SCHEMA
+// ==========================================
+
 const cartSchema = new Schema<ICart>(
   {
     user: {
@@ -73,7 +84,6 @@ const cartSchema = new Schema<ICart>(
       ref: "User",
       required: true,
       unique: true,
-      index: true,
     },
 
     items: {
@@ -87,7 +97,9 @@ const cartSchema = new Schema<ICart>(
   }
 );
 
-cartSchema.index({ user: 1 });
+// ==========================================
+// EXPORT CART MODEL
+// ==========================================
 
 export const Cart =
   models.Cart || model<ICart>("Cart", cartSchema);
