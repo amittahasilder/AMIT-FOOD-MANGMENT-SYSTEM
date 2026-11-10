@@ -1,93 +1,46 @@
 
-import mongoose, { Schema, models, model } from "mongoose";
+import { z } from "zod";
 
-export type CartItemType = "restaurant" | "marketplace";
+const objectIdSchema = z
+  .string()
+  .regex(/^[0-9a-fA-F]{24}$/, "Invalid ID");
 
-export interface ICartItem {
-  itemType: CartItemType;
-  menuItem?: mongoose.Types.ObjectId;
-  product?: mongoose.Types.ObjectId;
-  quantity: number;
-}
+const restaurantCartItemSchema = z
+  .object({
+    itemType: z.literal("restaurant"),
+    menuItem: objectIdSchema,
+    quantity: z.number().int().min(1).max(50),
+  })
+  .strict();
 
-export interface ICart extends mongoose.Document {
-  user: mongoose.Types.ObjectId;
-  items: ICartItem[];
-  createdAt: Date;
-  updatedAt: Date;
-}
+const marketplaceCartItemSchema = z
+  .object({
+    itemType: z.literal("marketplace"),
+    product: objectIdSchema,
+    quantity: z.number().int().min(1).max(50),
+  })
+  .strict();
 
-const cartItemSchema = new Schema<ICartItem>(
-  {
-    itemType: {
-      type: String,
-      enum: ["restaurant", "marketplace"],
-      required: true,
-    },
+export const addToCartSchema = z.discriminatedUnion("itemType", [
+  restaurantCartItemSchema,
+  marketplaceCartItemSchema,
+]);
 
-    menuItem: {
-      type: Schema.Types.ObjectId,
-      ref: "Menu",
-    },
+export const updateCartItemSchema = z
+  .object({
+    quantity: z.number().int().min(1).max(50),
+  })
+  .strict();
 
-    product: {
-      type: Schema.Types.ObjectId,
-      ref: "SellerProduct",
-    },
+export const removeCartItemSchema = z
+  .object({
+    cartItemId: objectIdSchema,
+  })
+  .strict();
 
-    quantity: {
-      type: Number,
-      required: true,
-      min: 1,
-      max: 50,
-    },
-  },
-  { _id: true }
-);
+export const cartItemIdParamsSchema = z
+  .object({
+    itemId: objectIdSchema,
+  });
 
-// Validate that each item references the correct product type.
-cartItemSchema.pre("validate", function () {
-  if (this.itemType === "restaurant") {
-    if (!this.menuItem || this.product) {
-      this.invalidate(
-        "menuItem",
-        "Restaurant items must reference a menu item only"
-      );
-    }
-  }
-
-  if (this.itemType === "marketplace") {
-    if (!this.product || this.menuItem) {
-      this.invalidate(
-        "product",
-        "Marketplace items must reference a seller product only"
-      );
-    }
-  }
-});
-
-const cartSchema = new Schema<ICart>(
-  {
-    user: {
-      type: Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-      unique: true,
-      index: true,
-    },
-
-    items: {
-      type: [cartItemSchema],
-      default: [],
-    },
-  },
-  {
-    timestamps: true,
-    versionKey: false,
-  }
-);
-
-cartSchema.index({ user: 1 });
-
-export const Cart =
-  models.Cart || model<ICart>("Cart", cartSchema);
+export type AddToCartInput = z.infer<typeof addToCartSchema>;
