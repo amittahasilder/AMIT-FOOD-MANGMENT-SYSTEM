@@ -1,7 +1,4 @@
 
-
-
-
 import express from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -13,7 +10,10 @@ import restaurantRoutes from "./modules/restaurants/restaurant.routes";
 import ownerApplicationRoutes from "./modules/owner-applications/owner-application.routes";
 import menuRoutes from "./modules/menu/menu.routes";
 import orderRoutes from "./modules/orders/order.routes";
+
 import sellerRoutes from "./modules/marketplace/seller.routes";
+import productCategoryRoutes from "./modules/marketplace/product-category.routes";
+import sellerProductRoutes from "./modules/marketplace/seller-product.routes";
 
 const app = express();
 
@@ -116,6 +116,18 @@ app.use("/api/orders", orderRoutes);
 // ==========================================
 
 app.use("/api/marketplace/sellers", sellerRoutes);
+
+// ==========================================
+// MARKETPLACE - PRODUCT CATEGORIES
+// ==========================================
+
+app.use("/api/marketplace/categories", productCategoryRoutes);
+
+// ==========================================
+// MARKETPLACE - SELLER PRODUCTS
+// ==========================================
+
+app.use("/api/marketplace/products", sellerProductRoutes);
 
 // ==========================================
 // 404 HANDLER
