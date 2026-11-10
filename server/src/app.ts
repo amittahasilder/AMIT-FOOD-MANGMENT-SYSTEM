@@ -5,12 +5,18 @@ import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import cookieParser from "cookie-parser";
 
+// ==========================================
+// ROUTE IMPORTS
+// ==========================================
+
 import authRoutes from "./modules/auth/auth.routes";
 import restaurantRoutes from "./modules/restaurants/restaurant.routes";
 import ownerApplicationRoutes from "./modules/owner-applications/owner-application.routes";
 import menuRoutes from "./modules/menu/menu.routes";
 import orderRoutes from "./modules/orders/order.routes";
+import cartRoutes from "./modules/cart/cart.routes";
 
+// MARKETPLACE ROUTES
 import sellerRoutes from "./modules/marketplace/seller.routes";
 import productCategoryRoutes from "./modules/marketplace/product-category.routes";
 import sellerProductRoutes from "./modules/marketplace/seller-product.routes";
@@ -104,6 +110,12 @@ app.use("/api/owner-applications", ownerApplicationRoutes);
 // ==========================================
 
 app.use("/api/menu", menuRoutes);
+
+// ==========================================
+// CUSTOMER CART
+// ==========================================
+
+app.use("/api/cart", cartRoutes);
 
 // ==========================================
 // CUSTOMER ORDERS
