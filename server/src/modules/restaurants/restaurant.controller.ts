@@ -1,8 +1,10 @@
 
-
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
+
 import { Restaurant } from "./restaurant.model";
+import { RestaurantOrganization } from "./restaurant-organization.model";
+
 import {
   createRestaurantSchema,
   updateRestaurantSchema,
@@ -23,7 +25,7 @@ function isAdmin(res: Response): boolean {
   return Boolean(user && user.isActive && user.role === "admin");
 }
 
-// Restaurant owner: create a restaurant for admin approval
+// Create partner organization + MAIN branch together
 export async function createRestaurant(req: Request, res: Response) {
   const parsed = createRestaurantSchema.safeParse(req.body);
 
@@ -39,49 +41,96 @@ export async function createRestaurant(req: Request, res: Response) {
     return;
   }
 
-  try {
-    const user = getAuthUser(res);
+  const user = getAuthUser(res);
 
-    if (!user || !user.isActive) {
-      res.status(401).json({
-        success: false,
-        message: "Authentication required",
-      });
-      return;
-    }
-
-    if (user.role !== "restaurant_owner") {
-      res.status(403).json({
-        success: false,
-        message: "Restaurant-owner access required",
-      });
-      return;
-    }
-
-    const restaurant = await Restaurant.create({
-      ...parsed.data,
-      owner: user.id,
-      status: "pending",
+  if (!user || !user.isActive) {
+    res.status(401).json({
+      success: false,
+      message: "Authentication required",
     });
+    return;
+  }
+
+  if (user.role !== "restaurant_owner") {
+    res.status(403).json({
+      success: false,
+      message: "Restaurant-owner access required",
+    });
+    return;
+  }
+
+  const session = await mongoose.startSession();
+
+  try {
+    let organization: mongoose.Types.ObjectId | null = null;
+    let restaurant: mongoose.Types.ObjectId | null = null;
+
+    await session.withTransaction(async () => {
+      const [createdOrganization] = await RestaurantOrganization.create(
+        [
+          {
+            name: parsed.data.name,
+            description: parsed.data.description,
+            owner: user.id,
+            ownershipType: "partner",
+            status: "pending",
+            isActive: true,
+          },
+        ],
+        { session }
+      );
+
+      const [createdRestaurant] = await Restaurant.create(
+        [
+          {
+            ...parsed.data,
+            owner: user.id,
+            organization: createdOrganization._id,
+            branchCode: "MAIN",
+            status: "pending",
+            isActive: true,
+          },
+        ],
+        { session }
+      );
+
+      organization = createdOrganization._id;
+      restaurant = createdRestaurant._id;
+    });
+
+    const savedOrganization = organization
+      ? await RestaurantOrganization.findById(organization).lean()
+      : null;
+
+    const savedRestaurant = restaurant
+      ? await Restaurant.findById(restaurant).lean()
+      : null;
 
     res.status(201).json({
       success: true,
-      message: "Restaurant submitted for approval",
-      restaurant,
+      message: "Restaurant organization and main branch submitted for approval",
+      organization: savedOrganization,
+      restaurant: savedRestaurant,
     });
   } catch (error) {
     console.error("Create restaurant error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to create restaurant",
     });
+  } finally {
+    await session.endSession();
   }
 }
 
-// Public: only approved restaurants are visible
+// Public: only approved and active restaurants
 export async function listRestaurants(_req: Request, res: Response) {
   try {
-    const restaurants = await Restaurant.find({ status: "approved" })
+    const restaurants = await Restaurant.find({
+      status: "approved",
+      isActive: true,
+    })
       .select("-__v")
       .sort({ createdAt: -1 })
       .limit(50)
@@ -94,6 +143,7 @@ export async function listRestaurants(_req: Request, res: Response) {
     });
   } catch (error) {
     console.error("List restaurants error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to fetch restaurants",
@@ -114,6 +164,14 @@ export async function getMyRestaurants(_req: Request, res: Response) {
       return;
     }
 
+    if (user.role !== "restaurant_owner") {
+      res.status(403).json({
+        success: false,
+        message: "Restaurant-owner access required",
+      });
+      return;
+    }
+
     const restaurants = await Restaurant.find({ owner: user.id })
       .select("-__v")
       .sort({ createdAt: -1 })
@@ -126,6 +184,7 @@ export async function getMyRestaurants(_req: Request, res: Response) {
     });
   } catch (error) {
     console.error("My restaurants error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to fetch your restaurants",
@@ -201,6 +260,7 @@ export async function updateMyRestaurant(req: Request, res: Response) {
     });
   } catch (error) {
     console.error("Update restaurant error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to update restaurant",
@@ -236,6 +296,7 @@ export async function listPendingRestaurants(
     });
   } catch (error) {
     console.error("List pending restaurants error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to fetch pending restaurants",
@@ -306,6 +367,7 @@ export async function reviewRestaurant(req: Request, res: Response) {
     });
   } catch (error) {
     console.error("Review restaurant error:", error);
+
     res.status(500).json({
       success: false,
       message: "Unable to review restaurant",

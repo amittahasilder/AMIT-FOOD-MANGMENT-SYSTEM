@@ -16,6 +16,9 @@ import menuRoutes from "./modules/menu/menu.routes";
 import orderRoutes from "./modules/orders/order.routes";
 import cartRoutes from "./modules/cart/cart.routes";
 
+// RESTAURANT TABLE ROUTES
+import tableRoutes from "./modules/restaurants/table.routes";
+
 // MARKETPLACE ROUTES
 import sellerRoutes from "./modules/marketplace/seller.routes";
 import productCategoryRoutes from "./modules/marketplace/product-category.routes";
@@ -98,6 +101,12 @@ app.use("/api/auth", authRoutes);
 // ==========================================
 
 app.use("/api/restaurants", restaurantRoutes);
+
+// ==========================================
+// RESTAURANT TABLE MANAGEMENT
+// ==========================================
+
+app.use("/api", tableRoutes);
 
 // ==========================================
 // OWNER APPLICATIONS
