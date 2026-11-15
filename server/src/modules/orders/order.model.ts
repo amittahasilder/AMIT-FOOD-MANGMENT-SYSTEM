@@ -1,4 +1,5 @@
 
+
 import { Schema, model, models } from "mongoose";
 
 const orderItemSchema = new Schema(
@@ -68,7 +69,15 @@ const orderSchema = new Schema(
       index: true,
     },
 
-    // Table number for dine-in orders.
+    // Actual restaurant table reference.
+    table: {
+      type: Schema.Types.ObjectId,
+      ref: "RestaurantTable",
+      default: null,
+      index: true,
+    },
+
+    // Table number snapshot for order history.
     tableNumber: {
       type: String,
       trim: true,
@@ -210,18 +219,44 @@ const orderSchema = new Schema(
 );
 
 // Customer order history.
-orderSchema.index({ customer: 1, createdAt: -1 });
+orderSchema.index({
+  customer: 1,
+  createdAt: -1,
+});
 
 // Restaurant order dashboard.
-orderSchema.index({ restaurant: 1, orderStatus: 1, createdAt: -1 });
+orderSchema.index({
+  restaurant: 1,
+  orderStatus: 1,
+  createdAt: -1,
+});
 
 // POS order filtering.
-orderSchema.index({ restaurant: 1, source: 1, createdAt: -1 });
+orderSchema.index({
+  restaurant: 1,
+  source: 1,
+  createdAt: -1,
+});
 
 // Kitchen display queue.
-orderSchema.index({ restaurant: 1, kitchenStatus: 1, createdAt: 1 });
+orderSchema.index({
+  restaurant: 1,
+  kitchenStatus: 1,
+  createdAt: 1,
+});
 
 // Order type filtering.
-orderSchema.index({ restaurant: 1, orderType: 1, createdAt: -1 });
+orderSchema.index({
+  restaurant: 1,
+  orderType: 1,
+  createdAt: -1,
+});
 
-export const Order = models.Order || model("Order", orderSchema);
+// Table order history.
+orderSchema.index({
+  table: 1,
+  createdAt: -1,
+});
+
+export const Order =
+  models.Order || model("Order", orderSchema);

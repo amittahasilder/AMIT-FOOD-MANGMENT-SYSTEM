@@ -11,6 +11,7 @@ import {
 } from "./order.validation";
 
 import { Restaurant } from "../restaurants/restaurant.model";
+import { RestaurantTable } from "../restaurants/table.model";
 import { Menu } from "../menu/menu.model";
 
 type AuthUser = {
@@ -23,7 +24,6 @@ const getAuthUser = (res: Response): AuthUser | null => {
   return (res.locals.authUser as AuthUser) || null;
 };
 
-// Type guard: true means user is definitely AuthUser.
 const isRestaurantManager = (
   user: AuthUser | null
 ): user is AuthUser => {
@@ -33,6 +33,10 @@ const isRestaurantManager = (
     ["restaurant_owner", "admin"].includes(user.role)
   );
 };
+
+// ==========================================
+// RESTAURANT ACCESS
+// ==========================================
 
 const getRestaurantAccess = async (
   restaurantId: string,
@@ -51,11 +55,40 @@ const getRestaurantAccess = async (
   return Restaurant.findOne(query);
 };
 
-// Shared menu-price calculation.
-// Prices are always read from the database.
+// ==========================================
+// TABLE RELEASE
+// ==========================================
+
+const releaseTableForOrder = async (
+  tableId: mongoose.Types.ObjectId,
+  orderId: mongoose.Types.ObjectId
+) => {
+  await RestaurantTable.updateOne(
+    {
+      _id: tableId,
+      currentOrder: orderId,
+      status: "occupied",
+    },
+    {
+      $set: {
+        status: "available",
+        currentOrder: null,
+        occupiedAt: null,
+      },
+    }
+  );
+};
+
+// ==========================================
+// MENU PRICE CALCULATION
+// ==========================================
+
 const calculateOrderItems = async (
   restaurantId: mongoose.Types.ObjectId,
-  requestedItems: Array<{ menuItem: string; quantity: number }>
+  requestedItems: Array<{
+    menuItem: string;
+    quantity: number;
+  }>
 ) => {
   const requestedIds = requestedItems.map(
     (item) => item.menuItem
@@ -98,9 +131,9 @@ const calculateOrderItems = async (
   });
 };
 
-// --------------------------------------------------
+// ==========================================
 // ONLINE CUSTOMER ORDER
-// --------------------------------------------------
+// ==========================================
 
 export const createOrder = async (
   req: Request,
@@ -159,6 +192,8 @@ export const createOrder = async (
       restaurant: restaurant._id,
       source: "online",
       orderType: "delivery",
+      table: null,
+      tableNumber: null,
       items: orderItems,
       subtotal,
       deliveryFee,
@@ -207,14 +242,17 @@ export const createOrder = async (
   }
 };
 
-// --------------------------------------------------
+// ==========================================
 // POS ORDER
-// --------------------------------------------------
+// ==========================================
 
 export const createPosOrder = async (
   req: Request,
   res: Response
 ) => {
+  let claimedTableId: mongoose.Types.ObjectId | null = null;
+  let createdOrderId: mongoose.Types.ObjectId | null = null;
+
   try {
     const user = getAuthUser(res);
 
@@ -264,35 +302,137 @@ export const createPosOrder = async (
     const deliveryFee = 0;
     const total = subtotal + deliveryFee;
 
+    // --------------------------------------
+    // ATOMIC TABLE CLAIM FOR DINE-IN
+    // --------------------------------------
+
+    let tableNumber: string | null = null;
+
+    if (data.orderType === "dine_in") {
+      const tableId = new mongoose.Types.ObjectId(data.table!);
+
+      const table = await RestaurantTable.findOneAndUpdate(
+        {
+          _id: tableId,
+          restaurant: restaurant._id,
+          status: "available",
+          isActive: true,
+          currentOrder: null,
+        },
+        {
+          $set: {
+            status: "occupied",
+            occupiedAt: new Date(),
+          },
+        },
+        {
+          new: true,
+        }
+      );
+
+      if (!table) {
+        return res.status(409).json({
+          success: false,
+          message:
+            "Table not found, inactive, or currently unavailable",
+        });
+      }
+
+      claimedTableId = table._id;
+      tableNumber = table.tableNumber;
+    }
+
+    // --------------------------------------
+    // CREATE POS ORDER
+    // --------------------------------------
+
     const order = await Order.create({
-      customer: null,
+      customer: data.customer ?? null,
       restaurant: restaurant._id,
       source: "pos",
       orderType: data.orderType,
       createdBy: user.id,
-      tableNumber:
+
+      table:
         data.orderType === "dine_in"
-          ? data.tableNumber
+          ? claimedTableId
           : null,
+
+      tableNumber,
+
       customerName: data.customerName,
       customerPhone: data.customerPhone,
+
       deliveryAddress:
         data.orderType === "delivery"
           ? data.deliveryAddress
           : "",
+
       items: orderItems,
       subtotal,
       deliveryFee,
       total,
       notes: data.notes,
       paymentMethod: data.paymentMethod,
+
       paymentStatus:
         data.paymentMethod === "online"
           ? "pending"
           : "unpaid",
+
       orderStatus: "confirmed",
       kitchenStatus: "queued",
     });
+
+    createdOrderId = order._id;
+
+    // --------------------------------------
+    // CONNECT ORDER TO TABLE
+    // --------------------------------------
+
+    if (claimedTableId) {
+      const tableUpdate = await RestaurantTable.updateOne(
+        {
+          _id: claimedTableId,
+          restaurant: restaurant._id,
+          status: "occupied",
+          currentOrder: null,
+        },
+        {
+          $set: {
+            currentOrder: order._id,
+          },
+        }
+      );
+
+      if (tableUpdate.modifiedCount !== 1) {
+        await Order.deleteOne({ _id: order._id });
+
+        createdOrderId = null;
+
+        await RestaurantTable.updateOne(
+          {
+            _id: claimedTableId,
+            status: "occupied",
+            currentOrder: null,
+          },
+          {
+            $set: {
+              status: "available",
+              occupiedAt: null,
+            },
+          }
+        );
+
+        claimedTableId = null;
+
+        return res.status(409).json({
+          success: false,
+          message:
+            "Could not assign order to table. Please try again.",
+        });
+      }
+    }
 
     return res.status(201).json({
       success: true,
@@ -300,6 +440,42 @@ export const createPosOrder = async (
       order,
     });
   } catch (error) {
+    // Roll back partially created POS order/table claim.
+    if (createdOrderId) {
+      await Order.deleteOne({ _id: createdOrderId }).catch(
+        (rollbackError) => {
+          console.error("Order rollback error:", rollbackError);
+        }
+      );
+    }
+
+    if (claimedTableId) {
+      if (createdOrderId) {
+        await releaseTableForOrder(
+          claimedTableId,
+          createdOrderId
+        ).catch((rollbackError) => {
+          console.error("Table rollback error:", rollbackError);
+        });
+      } else {
+        await RestaurantTable.updateOne(
+          {
+            _id: claimedTableId,
+            status: "occupied",
+            currentOrder: null,
+          },
+          {
+            $set: {
+              status: "available",
+              occupiedAt: null,
+            },
+          }
+        ).catch((rollbackError) => {
+          console.error("Table rollback error:", rollbackError);
+        });
+      }
+    }
+
     if (error instanceof Error) {
       if (error.message === "DUPLICATE_MENU_ITEMS") {
         return res.status(400).json({
@@ -326,9 +502,9 @@ export const createPosOrder = async (
   }
 };
 
-// --------------------------------------------------
+// ==========================================
 // CUSTOMER ORDER HISTORY
-// --------------------------------------------------
+// ==========================================
 
 export const getMyOrders = async (
   req: Request,
@@ -366,9 +542,9 @@ export const getMyOrders = async (
   }
 };
 
-// --------------------------------------------------
+// ==========================================
 // RESTAURANT ORDER DASHBOARD
-// --------------------------------------------------
+// ==========================================
 
 export const getRestaurantOrders = async (
   req: Request,
@@ -426,9 +602,9 @@ export const getRestaurantOrders = async (
   }
 };
 
-// --------------------------------------------------
+// ==========================================
 // RESTAURANT ORDER STATUS
-// --------------------------------------------------
+// ==========================================
 
 export const updateOrderStatus = async (
   req: Request,
@@ -494,9 +670,12 @@ export const updateOrderStatus = async (
     }
 
     if (
-      ["delivered", "cancelled", "picked_up", "served"].includes(
-        order.orderStatus
-      )
+      [
+        "delivered",
+        "cancelled",
+        "picked_up",
+        "served",
+      ].includes(order.orderStatus)
     ) {
       return res.status(400).json({
         success: false,
@@ -504,7 +683,7 @@ export const updateOrderStatus = async (
       });
     }
 
-    order.orderStatus = orderStatus;
+    order.orderStatus = orderStatus as typeof order.orderStatus;
 
     if (orderStatus === "preparing") {
       order.kitchenStatus = "preparing";
@@ -522,6 +701,17 @@ export const updateOrderStatus = async (
 
     await order.save();
 
+    // Release dine-in table after cancellation.
+    if (
+      orderStatus === "cancelled" &&
+      order.table
+    ) {
+      await releaseTableForOrder(
+        order.table,
+        order._id
+      );
+    }
+
     return res.status(200).json({
       success: true,
       message: "Order status updated successfully",
@@ -537,9 +727,9 @@ export const updateOrderStatus = async (
   }
 };
 
-// --------------------------------------------------
+// ==========================================
 // KITCHEN DISPLAY QUEUE
-// --------------------------------------------------
+// ==========================================
 
 export const getKitchenOrders = async (
   req: Request,
@@ -601,9 +791,9 @@ export const getKitchenOrders = async (
   }
 };
 
-// --------------------------------------------------
+// ==========================================
 // KITCHEN STATUS UPDATE
-// --------------------------------------------------
+// ==========================================
 
 export const updateKitchenStatus = async (
   req: Request,
@@ -663,9 +853,12 @@ export const updateKitchenStatus = async (
     }
 
     if (
-      ["cancelled", "delivered", "picked_up", "served"].includes(
-        order.orderStatus
-      )
+      [
+        "cancelled",
+        "delivered",
+        "picked_up",
+        "served",
+      ].includes(order.orderStatus)
     ) {
       return res.status(400).json({
         success: false,
@@ -704,6 +897,17 @@ export const updateKitchenStatus = async (
     }
 
     await order.save();
+
+    // Release dine-in table after serving or cancellation.
+    if (
+      ["served", "cancelled"].includes(kitchenStatus) &&
+      order.table
+    ) {
+      await releaseTableForOrder(
+        order.table,
+        order._id
+      );
+    }
 
     return res.status(200).json({
       success: true,
